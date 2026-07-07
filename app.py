@@ -372,6 +372,8 @@ APP_HTML_TEMPLATE = """<!DOCTYPE html>
   }
   .history-item:last-child{border-bottom:none;}
   .history-left{display:flex;align-items:center;gap:14px;}
+  .history-left.clickable{cursor:pointer;}
+  .history-left.clickable:hover .client-name{color:var(--navy);text-decoration:underline;}
   .client-avatar{
     width:36px;height:36px;border-radius:50%;
     display:flex;align-items:center;justify-content:center;
@@ -389,6 +391,23 @@ APP_HTML_TEMPLATE = """<!DOCTYPE html>
   .badge.draft{background:var(--beige);color:#8A6E3D;}
   .badge.hold{background:#EFEBF3;color:#6B5B95;}
   .badge.nego{background:#FFF3D6;color:#8A6E1D;}
+
+  /* 견적 이력 상세 보기 모달 */
+  .modal-overlay{
+    position:fixed;inset:0;z-index:200;
+    background:rgba(20,27,51,0.55);
+    display:flex;align-items:center;justify-content:center;padding:24px;
+  }
+  .modal-box{
+    background:var(--surface);border-radius:var(--radius);
+    max-width:640px;width:100%;max-height:85vh;overflow-y:auto;
+    padding:28px;box-shadow:0 20px 60px rgba(20,27,51,0.25);position:relative;
+  }
+  .modal-close{
+    position:absolute;top:14px;right:16px;background:none;border:none;
+    font-size:20px;line-height:1;cursor:pointer;color:var(--ink-soft);
+  }
+  .modal-close:hover{color:var(--navy-dark);}
 
   footer{
     text-align:center;padding:32px 0;color:var(--ink-soft);font-size:13px;
@@ -446,11 +465,11 @@ APP_HTML_TEMPLATE = """<!DOCTYPE html>
   }
   .empty-state .icon{font-size:32px;margin-bottom:10px;}
 
-  #builderView table{width:100%;border-collapse:collapse;font-size:14px;}
-  #builderView th, #builderView td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);}
-  #builderView th{color:var(--ink-soft);font-weight:700;font-size:12.5px;}
-  #builderView td.num, #builderView th.num{text-align:right;}
-  #builderView tr.total td{font-weight:800;color:var(--primary-dark);border-top:2px solid var(--primary-dark);border-bottom:none;}
+  #builderView table, #quoteDetailModal table{width:100%;border-collapse:collapse;font-size:14px;}
+  #builderView th, #builderView td, #quoteDetailModal th, #quoteDetailModal td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);}
+  #builderView th, #quoteDetailModal th{color:var(--ink-soft);font-weight:700;font-size:12.5px;}
+  #builderView td.num, #builderView th.num, #quoteDetailModal td.num, #quoteDetailModal th.num{text-align:right;}
+  #builderView tr.total td, #quoteDetailModal tr.total td{font-weight:800;color:var(--primary-dark);border-top:2px solid var(--primary-dark);border-bottom:none;}
 
   .status-flag{display:inline-block;font-size:13px;font-weight:700;padding:5px 12px;border-radius:999px;margin-bottom:12px;flex:0 0 auto;}
   .status-flag.warn{background:var(--warn-bg);color:var(--warn-ink);}
@@ -784,6 +803,26 @@ APP_HTML_TEMPLATE = """<!DOCTYPE html>
   </div>
 </main>
 
+<!-- ===== 견적 이력 상세 보기 모달 ===== -->
+<div class="modal-overlay view-hidden" id="quoteDetailModal" onclick="if(event.target===this) closeHistoryQuote();">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeHistoryQuote()">✕</button>
+    <span class="status-flag" id="historyFlagBadge"></span>
+    <div class="quote-meta" id="historyQuoteMeta"></div>
+    <table>
+      <thead>
+        <tr>
+          <th>항목</th>
+          <th class="num">단가</th>
+          <th class="num">수량</th>
+          <th class="num">금액</th>
+        </tr>
+      </thead>
+      <tbody id="historyQuoteBody"></tbody>
+    </table>
+  </div>
+</div>
+
 <footer>© 2026 퀵쿼트 · 화장품 ODM 영업사원을 위한 견적 관리 도구</footer>
 
 <script src="sample-data.js"></script>
@@ -857,9 +896,10 @@ APP_HTML_TEMPLATE = """<!DOCTYPE html>
     list.innerHTML = items.length ? items.map(q => {
       const style = CATEGORY_STYLE[q.category] || { bg:"var(--beige)", color:"var(--navy-dark)" };
       const statusClass = STATUS_CLASS[q.status] || "draft";
+      const idx = SAMPLE_QUOTES.indexOf(q);
       return `
         <div class="history-item">
-          <div class="history-left">
+          <div class="history-left clickable" onclick="openHistoryQuote(${idx})" title="클릭하면 견적서를 볼 수 있습니다">
             <div class="client-avatar" style="background:${avatarColor(q.client)};">${q.client.slice(0,2)}</div>
             <div>
               <div class="client-name">${q.client}</div>
@@ -898,6 +938,112 @@ APP_HTML_TEMPLATE = """<!DOCTYPE html>
   }
 
   renderHistory();
+
+  /* ===== 홈 화면: 견적 이력 상세 보기 (모달) ===== */
+  // 카테고리별로 그럴듯한 견적 항목(제형/용기/용량/단가대)을 정의 (금액은 이력에 저장된 값을 그대로 사용)
+  const CATEGORY_DETAIL = {
+    "스킨케어": {
+      formulations: ["크림/로션", "에센스/세럼", "앰플", "젤/워터"],
+      containers: ["펌프용기", "에어리스", "유리병", "튜브"],
+      volumes: [30, 50, 80, 100, 120, 150],
+      unitPriceRange: [15000, 40000]
+    },
+    "색조": {
+      formulations: ["파운데이션/쿠션", "립/아이제품"],
+      containers: ["기타", "펌프용기", "튜브"],
+      volumes: [8, 12, 15, 20, 30],
+      unitPriceRange: [8000, 30000]
+    },
+    "헤어케어": {
+      formulations: ["샴푸/트리트먼트", "젤/워터"],
+      containers: ["튜브", "펌프용기", "기타"],
+      volumes: [200, 300, 400, 500],
+      unitPriceRange: [5000, 18000]
+    }
+  };
+  const STATUS_FLAG_CLASS = { "완료": "ok", "진행": "ok", "네고": "warn", "보류": "warn" };
+
+  function hashSeed(str){
+    let hash = 0;
+    for (let i = 0; i < str.length; i++){ hash = str.charCodeAt(i) + ((hash << 5) - hash); }
+    return Math.abs(hash);
+  }
+
+  // 이력에 저장된 client/category/amount를 바탕으로 카테고리에 맞는 견적 항목을 생성 (같은 항목은 항상 같은 내용을 보여주도록 고객사·카테고리·순번으로 시드 고정)
+  function generateQuoteDetail(q, idx){
+    const detail = CATEGORY_DETAIL[q.category] || CATEGORY_DETAIL["스킨케어"];
+    const seed = hashSeed(`${q.client}-${q.category}-${idx}`);
+
+    const formulation = detail.formulations[seed % detail.formulations.length];
+    const containerType = detail.containers[Math.floor(seed / 7) % detail.containers.length];
+    const volume = detail.volumes[Math.floor(seed / 13) % detail.volumes.length];
+
+    const [minPrice, maxPrice] = detail.unitPriceRange;
+    const guessPrice = minPrice + (seed % 997) / 997 * (maxPrice - minPrice);
+    let qty = Math.round(q.amount / guessPrice / 100) * 100;
+    if (qty < 100) qty = 100;
+    const unitPrice = Math.round(q.amount / qty);
+
+    const paymentOptions = ["선금 30% / 잔금 70% (출고 전)", "전액 선불", "월말 일괄결제", "협의 후 결정"];
+    const paymentTerms = paymentOptions[Math.floor(seed / 3) % paymentOptions.length];
+    const repPool = ["김영업", "박영업", "이영업", "최영업", "정영업"];
+    const repName = repPool[Math.floor(seed / 5) % repPool.length];
+
+    const validDays = 14;
+    const issueDate = new Date();
+    issueDate.setDate(issueDate.getDate() - (seed % 180));
+    const validUntil = new Date(issueDate);
+    validUntil.setDate(validUntil.getDate() + validDays);
+
+    const quoteNo = `QT-${formatDate(issueDate).replace(/-/g, '')}-${String((idx % 999) + 1).padStart(3, '0')}`;
+
+    return { formulation, containerType, volume, qty, unitPrice, paymentTerms, repName, issueDate, validUntil, validDays, quoteNo };
+  }
+
+  function openHistoryQuote(idx){
+    const q = SAMPLE_QUOTES[idx];
+    if (!q) return;
+    const d = generateQuoteDetail(q, idx);
+
+    document.getElementById('historyQuoteMeta').innerHTML = `
+      <div class="quote-title-row">
+        <span class="quote-title">견적서</span>
+        <span class="quote-no">견적번호 ${d.quoteNo}</span>
+      </div>
+      <div class="quote-meta-grid">
+        <div><strong>고객사</strong>${q.client}</div>
+        <div><strong>발행일</strong>${formatDate(d.issueDate)}</div>
+        <div><strong>담당자</strong>${d.repName}</div>
+        <div><strong>결제조건</strong>${d.paymentTerms}</div>
+        <div><strong>견적 유효기간</strong>${formatDate(d.issueDate)} ~ ${formatDate(d.validUntil)} (${d.validDays}일)</div>
+      </div>
+    `;
+
+    document.getElementById('historyQuoteBody').innerHTML = `
+      <tr>
+        <td>${q.category} ${d.formulation} (용량 ${d.volume}g/ml, ${d.containerType})</td>
+        <td class="num">${d.unitPrice.toLocaleString()}원</td>
+        <td class="num">${d.qty.toLocaleString()}</td>
+        <td class="num">${q.amount.toLocaleString()}원</td>
+      </tr>
+      <tr class="total">
+        <td>합계 (VAT 포함)</td>
+        <td class="num"></td>
+        <td class="num"></td>
+        <td class="num">${q.amount.toLocaleString()}원</td>
+      </tr>
+    `;
+
+    const flag = document.getElementById('historyFlagBadge');
+    flag.className = `status-flag ${STATUS_FLAG_CLASS[q.status] || 'ok'}`;
+    flag.textContent = `진행상태: ${q.status}`;
+
+    document.getElementById('quoteDetailModal').classList.remove('view-hidden');
+  }
+
+  function closeHistoryQuote(){
+    document.getElementById('quoteDetailModal').classList.add('view-hidden');
+  }
 
   /* ===== 견적 생성 화면 ===== */
   // 원료단가표 (모의 데이터, g·ml당 원료단가)
