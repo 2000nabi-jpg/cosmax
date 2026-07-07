@@ -542,7 +542,7 @@ APP_HTML_TEMPLATE = """<!DOCTYPE html>
   <section class="hero">
     <div class="container hero-inner">
       <div class="hero-text">
-        <span class="hero-eyebrow">화장품 ODM 영업사원을 위한 견적 도구</span>
+        <span class="hero-eyebrow">빠른 견적 회신을 위한 퀵쿼트</span>
         <h1>몇 번의 입력으로<br>완성되는 <span>견적서</span></h1>
         <p>고객사 요청사항만 입력하면 표준 견적서가 자동으로 만들어지고, 고객사별 견적 이력을 한 번에 찾아볼 수 있습니다.</p>
         <div class="hero-actions">
